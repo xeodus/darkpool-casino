@@ -1,0 +1,15 @@
+[package]
+name = "darkpool_backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4.42"
+tracing = "0.1.41"
+anyhow = "1.0.100"
+postgres = "0.19.12"
+solana-sdk = "3.0.0"
+chacha20poly1305 = "0.10.1"
+anchor-lang = { version = "0.32.1", features = ["derive"] }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+tokio = { version = "1.48.0", features = ["full"] }
