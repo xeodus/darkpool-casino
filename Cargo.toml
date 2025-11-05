@@ -3,3 +3,4 @@ members = [
     "backend",
     "program"
 ]
+resolver = "3"
