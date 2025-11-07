@@ -1,13 +1,20 @@
 [package]
 name = "darkpool_program"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+default = []
+anchor-debug = []
+cpi = ["no-entrypoint"]
 
 [dependencies]
-web3 = "0.19.0"
-solana-cli = "3.0.8"
-tracing = "0.1.41"
-anyhow = "1.0.100"
-postgres = "0.19.12"
-anchor-lang = { version = "0.32.1", features = ["derive"] }
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
+solana-program = "3.0.0"
