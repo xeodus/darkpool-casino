@@ -18,11 +18,13 @@ impl SessionManager {
         }
     }
 
-    pub async fn create_sessions(&self, 
+    pub async fn create_sessions(
+        &self, 
         parent_wallet: &str, 
         vault_address: &str, 
         session_duration: i64
-    ) -> Result<CreateSessionResult> {
+    ) -> Result<CreateSessionResult> 
+    {
         let keypair = self.key_manager.generate_keypair()?;
         let encrypted_keypair = self.key_manager.encrypt_keypair(&keypair).await?;
         let ephemeral_wallet = keypair.pubkey().to_string();

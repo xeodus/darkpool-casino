@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .allow_headers(Any);
 
     let nest = Router::new()
+        .route("/ping", axum::routing::get(|| async { "pong" }))
         .nest("/api", create_routers(app_state.await))
         .layer(cors);
 

@@ -5,17 +5,17 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ephemeral_vault = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+ephemeral_vault = "9N97GnZ47zpk8VXBq7wRdKQEUbJT19r7XFQK2XahJYa3"
 
 [programs.devnet]
-ephemeral_vault = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+ephemeral_vault = "9N97GnZ47zpk8VXBq7wRdKQEUbJT19r7XFQK2XahJYa3"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "Localnet"
-wallet = "target/deploy/ephemeral_vault-keypair.json"
+wallet = "/Users/fever_dreamer/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

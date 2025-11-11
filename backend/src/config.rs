@@ -14,16 +14,11 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
-            server_addr: env::var("SERVER_ADDR")
-                .unwrap_or_else(|_| "0.0.0.0:5000".to_string()),
-            db_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://ricky:lucifer%40@localhost:5342/goquant".to_string()),
-            solana_rpc_url: env::var("SOLANA_RPC")
-                .unwrap_or_else(|_| "https://api.devnet.solana.com".to_string()),
-            program_id: env::var("PROGRAM_ID")
-                .unwrap_or_else(|_| "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS".to_string()),
-            encryption_id: env::var("ENCRYPTION_ID")
-                .unwrap_or_else(|_| "0000000000000000000000000000000000000000000000000000000000000000".to_string())
+            server_addr: env::var("SERVER_ADDR").expect("Server address not set.."),
+            db_url: env::var("DATABASE_URL").expect("Database url not set.."),
+            solana_rpc_url: env::var("SOLANA_RPC").expect("Solana rpc url not set.."),
+            program_id: env::var("PROGRAM_ID").expect("Program ID not set.."),
+            encryption_id: env::var("ENCRYPTION_ID").expect("Encryption ID not found..")
         })
     }
 }

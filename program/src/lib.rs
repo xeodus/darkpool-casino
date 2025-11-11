@@ -1,7 +1,6 @@
 pub mod state;
 pub mod error;
 pub mod instructions;
-
 use anchor_lang::prelude::*;
 
 use instructions::{
@@ -13,8 +12,7 @@ use instructions::{
     cleanup_vault::CleanupVault,
 };
 
-
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("9N97GnZ47zpk8VXBq7wRdKQEUbJT19r7XFQK2XahJYa3");
 
 pub mod ephemeral_vault {
     use super::*;

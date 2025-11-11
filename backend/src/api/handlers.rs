@@ -1,6 +1,5 @@
 use std::{env, str::FromStr};
 use anyhow::{anyhow, Result};
-use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use solana_program::example_mocks::solana_sdk::system_program;
@@ -13,6 +12,7 @@ use solana_sdk::{
 use axum::{Json, extract::{Path, State}, http::StatusCode};
 use crate::api::AppState;
 
+// Checking connection health
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -25,6 +25,8 @@ pub async fn check_health() -> Json<HealthResponse> {
         version: env!("CARGO_PKG_VERSION").to_string()
     })
 }
+
+// Create session request and expect response
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
@@ -63,6 +65,8 @@ pub async fn create_session(
     }))
 }
 
+// Approve delegation request and expect response
+
 #[derive(Debug, Deserialize)]
 pub struct ApproveDelegationRequest {
     pub session_id: String
@@ -91,6 +95,8 @@ pub async fn approve_delegation(
         message: format!("Delegation approved for ephemeral wallet for: {}", result.session_id)
     }))
 }
+
+// Create revoke request and expect response
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeAccessRequest {
@@ -128,6 +134,9 @@ pub async fn get_session_status(
         .ok_or((StatusCode::NOT_FOUND, "Session id not found".to_string()))?;
     Ok(Json(serde_json::to_value(session.is_active).unwrap()))
 }
+
+
+// Create transaction signature request and expect response
 
 #[derive(Debug, Deserialize)]
 pub struct TransactionSignatureRequest {
@@ -182,25 +191,18 @@ pub async fn sign_and_send(
     }))
 }
 
-
-pub static PROGRAM_ID: Lazy<Pubkey>= Lazy::new(|| {
-    Pubkey::from_str(
-        &env::var("PROGRAM_ID")
-            .unwrap_or_else(|_| "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS".to_string())
-    ).expect("invalid PROGRAM_ID env var")
-});
-
 #[inline]
 fn program_id() -> Pubkey {
-    *PROGRAM_ID
+    let program_id = Pubkey::from_str(&env::var("PROGRAM_ID").expect("Program ID is not set..")).unwrap();
+    program_id
 }
 
-/// Derive the vault PDA your program expects: seeds = [b"vault", user_wallet]
+// Derive the vault PDA your program expects: seeds = [b"vault", parent_wallet]
 pub fn derive_vault_pda(user_wallet: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"vault", user_wallet.as_ref()], &PROGRAM_ID)
+    Pubkey::find_program_address(&[b"vault", user_wallet.as_ref()], &program_id())
 }
 
-/// Build the `auto_deposit` instruction:
+// Build the auto_deposit instruction
 pub async fn build_deposit_ix(
     user_wallet: Pubkey,  
     vault_address: Pubkey,
@@ -233,6 +235,7 @@ pub async fn build_deposit_ix(
     })
 }
 
+// Create trigger deposit request and expect response
 
 #[derive(Debug, Deserialize)]
 pub struct TriggerDepositRequest {
@@ -252,8 +255,7 @@ pub async fn trigger_deposit(
     Json(payload): Json<TriggerDepositRequest>
 ) -> Result<Json<TriggerDepositResponse>, (StatusCode, String)> 
 {
-    let result = state.session_manager.get_session(&payload.sesssion_id)
-        .await
+    let result = state.session_manager.get_session(&payload.sesssion_id).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Session id not found".to_string()))?;
 
@@ -266,6 +268,7 @@ pub async fn trigger_deposit(
     }))
 }
 
+// Get the session stats
 #[derive(Debug, Serialize)]
 pub struct StatsResponse {
     pub active_sessions: i64,

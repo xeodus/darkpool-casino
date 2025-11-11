@@ -24,6 +24,8 @@ pub fn handler(ctx: Context<ApproveDelegates>, delegate: Pubkey) -> Result<()> {
 
     require!(vault.is_active, VaultError::VaultInactive);
     require!(vault.parent_wallet == ctx.accounts.parent_wallet.key(), VaultError::SessionExpired);
+    require!(vault.approved_amount > 0, VaultError::InvalidAmount);
+    require!(clock.unix_timestamp < vault.last_activity, VaultError::SessionExpired);
 
     vault.ephemeral_wallet = delegate;
     vault.delegate_approved = true;
