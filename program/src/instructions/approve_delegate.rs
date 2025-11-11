@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
-use crate::{error::VaultError, 
-    instructions::create_vault::EphemeralVault, 
-    state::vault::DelegateApproved
+use crate::{
+    error::VaultError,
+    state::vault::{DelegateApproved, EphemeralVault, VaultDelegation},
 };
 
 #[derive(Accounts)]
-pub struct ApproveDelegates<'info> {
+pub struct ApproveDelegate<'info> {
     #[account(mut)]
     pub parent_wallet: Signer<'info>,
     #[account(
@@ -15,27 +15,43 @@ pub struct ApproveDelegates<'info> {
         has_one = parent_wallet @ VaultError::UnauthorizedDelegation
     )]
     pub vault: Account<'info, EphemeralVault>,
-    pub system_program: Program<'info, System>
+    #[account(
+        init_if_needed,
+        payer = parent_wallet,
+        space = 8 + VaultDelegation::LEN,
+        seeds = [b"delegation", vault.key().as_ref()],
+        bump
+    )]
+    pub vault_delegation: Account<'info, VaultDelegation>,
+    pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<ApproveDelegates>, delegate: Pubkey) -> Result<()> {
+pub fn handler(ctx: Context<ApproveDelegate>, delegate: Pubkey) -> Result<()> {
     let clock = Clock::get()?;
     let vault = &mut ctx.accounts.vault;
+    let delegation = &mut ctx.accounts.vault_delegation;
 
     require!(vault.is_active, VaultError::VaultInactive);
-    require!(vault.parent_wallet == ctx.accounts.parent_wallet.key(), VaultError::SessionExpired);
-    require!(vault.approved_amount > 0, VaultError::InvalidAmount);
-    require!(clock.unix_timestamp < vault.last_activity, VaultError::SessionExpired);
+    require!(!vault.has_expired(clock.unix_timestamp), VaultError::SessionExpired);
+    require!(delegate != Pubkey::default(), VaultError::UnauthorizedDelegation);
 
     vault.ephemeral_wallet = delegate;
-    vault.delegate_approved = true;
+    vault.last_activity = clock.unix_timestamp;
 
-    emit!({
-        DelegateApproved {
-            vault: vault.key(),
-            delegate,
-            timestamp: clock.unix_timestamp
-        }
+    delegation.vault = vault.key();
+    delegation.delegate = delegate;
+    delegation.approved_at = clock.unix_timestamp;
+    delegation.revoked_at = 0;
+    delegation.is_active = true;
+    delegation.bump = *ctx
+        .bumps
+        .get("vault_delegation")
+        .ok_or(VaultError::ArithmeticOverflow)?;
+
+    emit!(DelegateApproved {
+        vault: vault.key(),
+        delegate,
+        timestamp: clock.unix_timestamp,
     });
 
     Ok(())

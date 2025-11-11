@@ -16,7 +16,7 @@ impl Config {
         Ok(Self {
             server_addr: env::var("SERVER_ADDR").expect("Server address not set.."),
             db_url: env::var("DATABASE_URL").expect("Database url not set.."),
-            solana_rpc_url: env::var("SOLANA_RPC").expect("Solana rpc url not set.."),
+            solana_rpc_url: env::var("SOLANA_RPC_URL").expect("Solana rpc url not set.."),
             program_id: env::var("PROGRAM_ID").expect("Program ID not set.."),
             encryption_id: env::var("ENCRYPTION_ID").expect("Encryption ID not found..")
         })

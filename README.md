@@ -35,9 +35,9 @@ The Ephemeral Vault System enables high-frequency trading without constant walle
 
 ### 1. Create Vault
 ```rust
-create_ephemeral_vault(session_duration: i64)
+create_ephemeral_vault(approved_amount: u64, session_duration: i64)
 ```
-Creates a new ephemeral vault PDA for the parent wallet with specified session duration.
+Creates a new ephemeral vault PDA for the parent wallet with a spending ceiling and session duration.
 
 ### 2. Approve Delegate
 ```rust
@@ -47,17 +47,23 @@ Grants trading permissions to the ephemeral wallet. Must be signed by parent wal
 
 ### 3. Auto Deposit
 ```rust
-auto_deposit(amount: u64)
+auto_deposit_for_trade(amount: u64)
 ```
 Transfers SOL from parent wallet to vault for transaction fees.
 
-### 4. Revoke Access
+### 4. Execute Trade
+```rust
+execute_trade(trade_amount: u64, trading_fee: u64)
+```
+Validates delegate authority, session status, and spend limits while accounting for fee usage.
+
+### 5. Revoke Access
 ```rust
 revoke_access()
 ```
 Parent wallet revokes delegation and retrieves remaining funds.
 
-### 5. Cleanup Vault
+### 6. Cleanup Vault
 ```rust
 cleanup_vault()
 ```
@@ -68,12 +74,13 @@ Anyone can call after session expiry to return funds and close vault. Cleanup ca
 ### Session Management
 
 ```
-POST   /api/session/create
-POST   /api/session/approve
-DELETE /api/session/revoke
-GET    /api/session/status/:session_id
-POST   /api/session/deposit
-GET    /api/session/stats
+POST   /api/session/create         # bootstrap session + create-vault ix
+POST   /api/session/approve        # prepare approve-delegate ix
+POST   /api/session/deposit        # prepare auto-deposit ix
+POST   /api/session/sign           # sign & submit trade via ephemeral wallet
+DELETE /api/session/revoke         # prepare revoke ix
+GET    /api/session/status/:id     # session snapshot
+GET    /api/session/stats          # operational metrics
 GET    /api/health
 ```
 
@@ -84,8 +91,9 @@ GET    /api/health
 POST /api/session/create
 {
   "parent_wallet": "5XqZ...",
-  "vault_address": "8YtP...",
-  "session_duration_seconds": 3600
+  "approved_amount": 1000000000,
+  "session_duration": 3600,
+  "expected_transactions": 120
 }
 ```
 
@@ -95,8 +103,20 @@ POST /api/session/create
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "ephemeral_wallet": "9KpR...",
   "vault_address": "8YtP...",
+  "parent_wallet": "5XqZ...",
   "expires_at": "2025-11-06T15:30:00Z",
-  "suggested_deposit": 1500000
+  "suggested_deposit": 1500000,
+  "instructions": [
+    {
+      "program_id": "9N97GnZ47zpk8VXBq7wRdKQEUbJT19r7XFQK2XahJYa3",
+      "accounts": [
+        { "pubkey": "5XqZ...", "is_signer": true, "is_writable": true },
+        { "pubkey": "8YtP...", "is_signer": false, "is_writable": true },
+        { "pubkey": "11111111111111111111111111111111", "is_signer": false, "is_writable": false }
+      ],
+      "data": "B3fR...=="
+    }
+  ]
 }
 ```
 

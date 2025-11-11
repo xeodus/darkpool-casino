@@ -1,10 +1,14 @@
-use std::sync::Arc;
-use anyhow::anyhow;
+use std::{sync::Arc, time::Duration};
+use anyhow::Context;
 
-use crate::{config::Config, db::Database, 
-    services::{deposit_calculator::DepositCalculator, 
-    key_manager::KeyManager, session_manager::SessionManager, 
-    transaction_manager::TransactionSigner}
+use crate::{
+    config::Config,
+    db::Database,
+    services::{
+        deposit_calculator::DepositCalculator, delegation_manager::DelegationManager,
+        key_manager::KeyManager, session_manager::SessionManager,
+        transaction_manager::TransactionSigner, vault_monitor::VaultMonitor,
+    },
 };
 
 pub mod routers;
@@ -16,25 +20,40 @@ pub struct AppState {
     pub session_manager: Arc<SessionManager>,
     pub deposit_calculator: Arc<DepositCalculator>,
     pub transaction_signer: Arc<TransactionSigner>,
-    pub key_manager: Arc<KeyManager>
+    pub key_manager: Arc<KeyManager>,
+    pub delegation_manager: Arc<DelegationManager>,
 }
 
 impl AppState {
-    pub async fn new(config: Config, database: Database) -> Self {
-        let key_manager = KeyManager::new(&config.encryption_id)
-            .map_err(|e| anyhow!("Failed to get key manager: {}", e)).unwrap();
+    pub async fn new(config: Config, database: Database) -> anyhow::Result<Self> {
+        let key_manager = Arc::new(
+            KeyManager::new(&config.encryption_id)
+                .context("failed to initialise key manager")?,
+        );
 
-        let session_manager = Arc::new(SessionManager::new(database.pool.clone(), key_manager));
+        let session_manager =
+            Arc::new(SessionManager::new(database.pool.clone(), key_manager.clone()));
         let deposit_calculator = Arc::new(DepositCalculator::new());
         let transaction_signer = Arc::new(TransactionSigner::new(&config.solana_rpc_url));
-        let key_manager = Arc::new(KeyManager::new(&config.encryption_id).unwrap());
+        let delegation_manager = Arc::new(
+            DelegationManager::new(&config.program_id)
+                .context("failed to initialise delegation manager")?,
+        );
 
-        Self {
+        let monitor = Arc::new(VaultMonitor::new(
+            session_manager.clone(),
+            deposit_calculator.clone(),
+            Duration::from_secs(30),
+        ));
+        monitor.spawn();
+
+        Ok(Self {
             config,
             session_manager,
             deposit_calculator,
             transaction_signer,
-            key_manager
-        }
+            key_manager,
+            delegation_manager,
+        })
     }
 }

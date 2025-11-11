@@ -29,6 +29,9 @@ impl Database {
         client.batch_execute(schema::CREATE_DELEGATIONS_TABLE).await?;
         client.batch_execute(schema::CREATE_VAULT_TRANSACTIONS_TABLE).await?;
         client.batch_execute(schema::CREATE_CLEANUP_EVENTS_TABLE).await?;
+        client
+            .batch_execute(schema::CREATE_SESSION_ANALYTICS_TABLE)
+            .await?;
         tracing::info!("Database migration completed!");
         Ok(())
     }

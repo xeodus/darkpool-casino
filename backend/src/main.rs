@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let database = Database::new(&config.db_url).await?;
     database.run_migrations().await?;
 
-    let app_state = AppState::new(config.clone(), database);
+    let app_state = AppState::new(config.clone(), database).await?;
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let nest = Router::new()
         .route("/ping", axum::routing::get(|| async { "pong" }))
-        .nest("/api", create_routers(app_state.await))
+        .nest("/api", create_routers(app_state.clone()))
         .layer(cors);
 
     let listener = tokio::net::TcpListener::bind(&config.server_addr).await?;

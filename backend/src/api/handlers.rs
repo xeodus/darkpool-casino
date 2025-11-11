@@ -1,102 +1,281 @@
-use std::{env, str::FromStr};
-use anyhow::{anyhow, Result};
-use sha2::{Digest, Sha256};
-use serde::{Deserialize, Serialize};
-use solana_program::example_mocks::solana_sdk::system_program;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signer::Signer,
-    transaction::Transaction,
+use std::str::FromStr;
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
 };
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use serde::{Deserialize, Serialize};
+use solana_sdk::{instruction::Instruction, pubkey::Pubkey, transaction::Transaction};
+
 use crate::api::AppState;
 
-// Checking connection health
+const DEFAULT_SESSION_DURATION_SECS: i64 = 4 * 60 * 60;
+
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: String,
-    pub version: String
+    pub version: String,
 }
 
 pub async fn check_health() -> Json<HealthResponse> {
     Json(HealthResponse {
-        status: "Healthy".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string()
+        status: "healthy".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
-
-// Create session request and expect response
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
     pub parent_wallet: String,
-    pub vault_address: String,
-    pub timestamp: i64
+    pub approved_amount: u64,
+    #[serde(default = "default_session_duration")]
+    pub session_duration: i64,
+    #[serde(default)]
+    pub expected_transactions: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CreateSessionResponse {
     pub session_id: String,
+    pub parent_wallet: String,
     pub ephemeral_wallet: String,
     pub vault_address: String,
     pub expires_at: String,
-    pub suggested_deposit: u64
+    pub suggested_deposit: u64,
+    pub instructions: Vec<EncodedInstruction>,
 }
 
 pub async fn create_session(
     State(state): State<AppState>,
-    Json(payload): Json<CreateSessionRequest>
-) -> Result<Json<CreateSessionResponse>, (StatusCode, String)> 
-{
-    let result = state.session_manager.create_sessions(
-        &payload.parent_wallet, &payload.vault_address, payload.timestamp)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Json(payload): Json<CreateSessionRequest>,
+) -> Result<Json<CreateSessionResponse>, (StatusCode, String)> {
+    let parent_wallet =
+        Pubkey::from_str(&payload.parent_wallet).map_err(|_| bad_request("invalid parent wallet"))?;
 
-    let suggested_deposit = state.deposit_calculator.calculate_default_deposit();
+    if payload.session_duration <= 0 {
+        return Err(bad_request("session_duration must be positive"));
+    }
+    if payload.approved_amount == 0 {
+        return Err(bad_request("approved_amount must be greater than zero"));
+    }
+
+    let (vault_address, _) = state.delegation_manager.derive_vault_pda(&parent_wallet);
+
+    let session = state
+        .session_manager
+        .create_session(
+            &payload.parent_wallet,
+            &vault_address.to_string(),
+            payload.approved_amount,
+            payload.session_duration,
+        )
+        .await
+        .map_err(internal)?;
+
+    let suggested_deposit = payload
+        .expected_transactions
+        .map(|expected| state.deposit_calculator.calculate_deposit(expected))
+        .unwrap_or_else(|| state.deposit_calculator.calculate_default_deposit());
+
+    let create_ix = state
+        .delegation_manager
+        .build_create_vault_ix(
+            parent_wallet,
+            payload.approved_amount,
+            payload.session_duration,
+        )
+        .map_err(internal)?;
 
     Ok(Json(CreateSessionResponse {
-        session_id: result.session_id,
-        ephemeral_wallet: result.ephemeral_wallet,
-        vault_address: result.vault_address,
-        expires_at: result.expires_at.to_rfc3339(),
-        suggested_deposit
+        session_id: session.session_id,
+        parent_wallet: session.parent_wallet,
+        ephemeral_wallet: session.ephemeral_wallet,
+        vault_address: session.vault_address,
+        expires_at: session.expires_at.to_rfc3339(),
+        suggested_deposit,
+        instructions: vec![encode_instruction(&create_ix)],
     }))
 }
 
-// Approve delegation request and expect response
-
 #[derive(Debug, Deserialize)]
 pub struct ApproveDelegationRequest {
-    pub session_id: String
+    pub session_id: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ApproveDelegationResponse {
     pub success: bool,
-    pub message: String
+    pub message: String,
+    pub instruction: EncodedInstruction,
 }
 
 pub async fn approve_delegation(
     State(state): State<AppState>,
-    Json(payload): Json<ApproveDelegationRequest>
-) -> Result<Json<ApproveDelegationResponse>, (StatusCode, String)>
-
-{
-    let result = state.session_manager
+    Json(payload): Json<ApproveDelegationRequest>,
+) -> Result<Json<ApproveDelegationResponse>, (StatusCode, String)> {
+    let session = state
+        .session_manager
         .get_session(&payload.session_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Session id not found".to_string()))?;
+        .map_err(internal)?
+        .ok_or(not_found("session id not found"))?;
+
+    let parent_wallet =
+        Pubkey::from_str(&session.parent_wallet).map_err(|_| bad_request("invalid parent wallet"))?;
+    let delegate =
+        Pubkey::from_str(&session.ephemeral_wallet).map_err(|_| bad_request("invalid delegate"))?;
+
+    let approve_ix = state
+        .delegation_manager
+        .build_approve_delegate_ix(parent_wallet, delegate)
+        .map_err(internal)?;
+
+    state
+        .session_manager
+        .record_delegation(
+            &session.session_id,
+            &session.vault_address,
+            &session.ephemeral_wallet,
+        )
+        .await
+        .map_err(internal)?;
 
     Ok(Json(ApproveDelegationResponse {
         success: true,
-        message: format!("Delegation approved for ephemeral wallet for: {}", result.session_id)
+        message: format!(
+            "Delegation prepared for session {} and delegate {}",
+            session.session_id, session.ephemeral_wallet
+        ),
+        instruction: encode_instruction(&approve_ix),
     }))
 }
 
-// Create revoke request and expect response
+#[derive(Debug, Deserialize)]
+pub struct TriggerDepositRequest {
+    pub session_id: String,
+    pub amount: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TriggerDepositResponse {
+    pub instruction: EncodedInstruction,
+    pub amount: u64,
+    pub vault_address: String,
+}
+
+pub async fn trigger_deposit(
+    State(state): State<AppState>,
+    Json(payload): Json<TriggerDepositRequest>,
+) -> Result<Json<TriggerDepositResponse>, (StatusCode, String)> {
+    let session = state
+        .session_manager
+        .get_session(&payload.session_id)
+        .await
+        .map_err(internal)?
+        .ok_or(not_found("session id not found"))?;
+
+    let parent_wallet =
+        Pubkey::from_str(&session.parent_wallet).map_err(|_| bad_request("invalid parent wallet"))?;
+
+    let amount = payload
+        .amount
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| state.deposit_calculator.calculate_default_deposit());
+
+    if amount > session.approved_amount.saturating_sub(session.total_deposited) {
+        return Err(bad_request("amount exceeds remaining session allowance"));
+    }
+
+    let deposit_ix = state
+        .delegation_manager
+        .build_auto_deposit_ix(parent_wallet, amount)
+        .map_err(internal)?;
+
+    Ok(Json(TriggerDepositResponse {
+        instruction: encode_instruction(&deposit_ix),
+        amount,
+        vault_address: session.vault_address,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransactionSignatureRequest {
+    pub session_id: String,
+    pub trade_amount: u64,
+    pub trading_fee: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TransactionSignatureResponse {
+    pub success: bool,
+    pub signature: String,
+}
+
+pub async fn sign_and_send(
+    State(state): State<AppState>,
+    Json(payload): Json<TransactionSignatureRequest>,
+) -> Result<Json<TransactionSignatureResponse>, (StatusCode, String)> {
+    if payload.trade_amount == 0 {
+        return Err(bad_request("trade_amount must be greater than zero"));
+    }
+
+    let session = state
+        .session_manager
+        .get_session(&payload.session_id)
+        .await
+        .map_err(internal)?
+        .ok_or(not_found("session id not found"))?;
+
+    let encrypted_keypair = state
+        .session_manager
+        .fetch_encrypted_keypair(&session.session_id)
+        .await
+        .map_err(internal)?
+        .ok_or(not_found("no keypair stored for session"))?;
+
+    let keypair = state
+        .key_manager
+        .decrypt_keypair(&encrypted_keypair)
+        .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+
+    let delegate =
+        Pubkey::from_str(&session.ephemeral_wallet).map_err(|_| bad_request("invalid delegate"))?;
+    let parent_wallet =
+        Pubkey::from_str(&session.parent_wallet).map_err(|_| bad_request("invalid parent wallet"))?;
+
+    let ix = state
+        .delegation_manager
+        .build_execute_trade_ix(
+            parent_wallet,
+            delegate,
+            payload.trade_amount,
+            payload.trading_fee,
+        )
+        .map_err(internal)?;
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&delegate));
+    let signature = state
+        .transaction_signer
+        .signed_and_send_with_retry(&mut tx, &keypair, 5)
+        .await
+        .map_err(internal)?;
+
+    state
+        .session_manager
+        .record_trade(
+            &session.session_id,
+            payload.trade_amount.saturating_add(payload.trading_fee),
+        )
+        .await
+        .map_err(internal)?;
+
+    Ok(Json(TransactionSignatureResponse {
+        success: true,
+        signature: signature.to_string(),
+    }))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeAccessRequest {
@@ -106,169 +285,79 @@ pub struct RevokeAccessRequest {
 #[derive(Debug, Serialize)]
 pub struct RevokeAccessResponse {
     pub success: bool,
-    pub message: String
+    pub instruction: EncodedInstruction,
 }
 
 pub async fn revoke_access(
     State(state): State<AppState>,
-    Json(payload): Json<RevokeAccessRequest>
-) -> Result<Json<RevokeAccessResponse>, (StatusCode, String)>
-{
-    state.session_manager.deactive_session(&payload.session_id)
+    Json(payload): Json<RevokeAccessRequest>,
+) -> Result<Json<RevokeAccessResponse>, (StatusCode, String)> {
+    let session = state
+        .session_manager
+        .get_session(&payload.session_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?
+        .ok_or(not_found("session id not found"))?;
+
+    let parent_wallet =
+        Pubkey::from_str(&session.parent_wallet).map_err(|_| bad_request("invalid parent wallet"))?;
+
+    let revoke_ix = state
+        .delegation_manager
+        .build_revoke_access_ix(parent_wallet)
+        .map_err(internal)?;
+
+    state
+        .session_manager
+        .deactivate_session(&session.session_id)
+        .await
+        .map_err(internal)?;
 
     Ok(Json(RevokeAccessResponse {
         success: true,
-        message: "Successfully revoked session access".to_string()
+        instruction: encode_instruction(&revoke_ix),
     }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionStatusResponse {
+    pub session_id: String,
+    pub parent_wallet: String,
+    pub ephemeral_wallet: String,
+    pub vault_address: String,
+    pub approved_amount: u64,
+    pub total_deposited: u64,
+    pub total_spent: u64,
+    pub expires_at: String,
+    pub last_activity: String,
+    pub is_active: bool,
 }
 
 pub async fn get_session_status(
     State(state): State<AppState>,
-    Path(session_id): Path<String>
-) -> Result<Json<serde_json::Value>, (StatusCode, String)>
-{
-    let session = state.session_manager.get_session(&session_id).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Session id not found".to_string()))?;
-    Ok(Json(serde_json::to_value(session.is_active).unwrap()))
-}
+    Path(session_id): Path<String>,
+) -> Result<Json<SessionStatusResponse>, (StatusCode, String)> {
+    let session = state
+        .session_manager
+        .get_session(&session_id)
+        .await
+        .map_err(internal)?
+        .ok_or(not_found("session id not found"))?;
 
-
-// Create transaction signature request and expect response
-
-#[derive(Debug, Deserialize)]
-pub struct TransactionSignatureRequest {
-    pub session_id: String,
-    pub amount: u64
-}
-
-#[derive(Debug, Serialize)]
-pub struct TransactionSignatureResponse {
-    pub success: bool,
-    pub signature: String
-}
-
-pub async fn sign_and_send(
-    State(state): State<AppState>,
-    Json(payload): Json<TransactionSignatureRequest>
-) -> Result<Json<TransactionSignatureResponse>, (StatusCode, String)>
-{
-    let session = state.session_manager.get_session(&payload.session_id).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Invalid session id".to_string()))?;
-
-    let client = state.session_manager.pool.get().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let query = client.query_one(
-        "SELECT encrypted_keypair FROM sessions WHERE session_id=$1",
-        &[&payload.session_id]
-    )
-    .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let encrypted_keypair: String = query.get(0);
-    let kp = state.key_manager.decrypt_keypair(&encrypted_keypair)
-        .map_err(|e| (StatusCode::NOT_ACCEPTABLE, e.to_string()))?;
-
-    /*let recent_blockhash = state.transaction_signer.rpc_client.get_latest_blockhash()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));*/
-    let parent_wallet = Pubkey::from_str(&session.parent_wallet)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Cannot parse parent wallet addr".to_string()))?;
-    let vault_address = Pubkey::from_str(&session.vault_address)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Cannot parse vault address".to_string()))?;
-
-    let ix = build_deposit_ix(parent_wallet, vault_address, payload.amount)
-    .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&kp.pubkey()));
-    let sign = state.transaction_signer.signed_and_send_with_retry(&mut tx, &kp, 5).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    Ok(Json(TransactionSignatureResponse {
-        success: true,
-        signature: sign.to_string()
+    Ok(Json(SessionStatusResponse {
+        session_id: session.session_id,
+        parent_wallet: session.parent_wallet,
+        ephemeral_wallet: session.ephemeral_wallet,
+        vault_address: session.vault_address,
+        approved_amount: session.approved_amount,
+        total_deposited: session.total_deposited,
+        total_spent: session.total_spent,
+        expires_at: session.expires_at.to_rfc3339(),
+        last_activity: session.last_activity.to_rfc3339(),
+        is_active: session.is_active,
     }))
 }
 
-#[inline]
-fn program_id() -> Pubkey {
-    let program_id = Pubkey::from_str(&env::var("PROGRAM_ID").expect("Program ID is not set..")).unwrap();
-    program_id
-}
-
-// Derive the vault PDA your program expects: seeds = [b"vault", parent_wallet]
-pub fn derive_vault_pda(user_wallet: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"vault", user_wallet.as_ref()], &program_id())
-}
-
-// Build the auto_deposit instruction
-pub async fn build_deposit_ix(
-    user_wallet: Pubkey,  
-    vault_address: Pubkey,
-    trade_fee_estimate: u64,
-) -> Result<Instruction> 
-{
-    let (expected, _) = derive_vault_pda(&user_wallet);
-    if expected != vault_address {
-        return Err(anyhow!("vault PDA mismatch: expected {}, got {}", expected, vault_address));
-    }
-
-    let accounts = vec![
-        AccountMeta::new(user_wallet, true),
-        AccountMeta::new(vault_address, false),
-        AccountMeta::new_readonly(system_program::ID, false),
-    ];
-    
-    let mut hasher = Sha256::new();
-    hasher.update(b"global:auto_deposit");
-    let disc = &hasher.finalize()[..8];
-
-    let mut data = Vec::with_capacity(8 + 8);
-    data.extend_from_slice(disc);
-    data.extend_from_slice(&trade_fee_estimate.to_le_bytes()); // single u64 arg
-
-    Ok(Instruction {
-        program_id: program_id(),
-        accounts,
-        data,
-    })
-}
-
-// Create trigger deposit request and expect response
-
-#[derive(Debug, Deserialize)]
-pub struct TriggerDepositRequest {
-    pub sesssion_id: String,
-    pub amount: u64
-}
-
-#[derive(Debug, Serialize)]
-pub struct TriggerDepositResponse {
-    pub success: bool,
-    pub amount: u64,
-    pub message: String
-}
-
-pub async fn trigger_deposit(
-    State(state): State<AppState>,
-    Json(payload): Json<TriggerDepositRequest>
-) -> Result<Json<TriggerDepositResponse>, (StatusCode, String)> 
-{
-    let result = state.session_manager.get_session(&payload.sesssion_id).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Session id not found".to_string()))?;
-
-    let amount = Some(payload.amount).unwrap_or_else(|| state.deposit_calculator.calculate_default_deposit());
-
-    Ok(Json(TriggerDepositResponse {
-        success: true,
-        amount,
-        message: format!("Deposit of {} lamports prepared for vault {}", amount, result.vault_address)
-    }))
-}
-
-// Get the session stats
 #[derive(Debug, Serialize)]
 pub struct StatsResponse {
     pub active_sessions: i64,
@@ -283,11 +372,57 @@ pub async fn get_stats(
         .session_manager
         .get_active_sessions_count()
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
     Ok(Json(StatsResponse {
         active_sessions,
-        total_capacity: 1000,
+        total_capacity: 1_000,
         system_status: "operational".to_string(),
     }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct EncodedInstruction {
+    pub program_id: String,
+    pub accounts: Vec<EncodedAccountMeta>,
+    pub data: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EncodedAccountMeta {
+    pub pubkey: String,
+    pub is_signer: bool,
+    pub is_writable: bool,
+}
+
+fn encode_instruction(ix: &Instruction) -> EncodedInstruction {
+    EncodedInstruction {
+        program_id: ix.program_id.to_string(),
+        accounts: ix
+            .accounts
+            .iter()
+            .map(|meta| EncodedAccountMeta {
+                pubkey: meta.pubkey.to_string(),
+                is_signer: meta.is_signer,
+                is_writable: meta.is_writable,
+            })
+            .collect(),
+        data: BASE64.encode(&ix.data),
+    }
+}
+
+fn default_session_duration() -> i64 {
+    DEFAULT_SESSION_DURATION_SECS
+}
+
+fn internal<E: ToString>(error: E) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+}
+
+fn not_found(message: &str) -> (StatusCode, String) {
+    (StatusCode::NOT_FOUND, message.to_string())
+}
+
+fn bad_request(message: &str) -> (StatusCode, String) {
+    (StatusCode::BAD_REQUEST, message.to_string())
 }
