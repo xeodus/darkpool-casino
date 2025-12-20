@@ -45,7 +45,7 @@ impl TransactionSigner {
         match self.rpc_client.confirm_transaction(sign) {
             Ok(done) => Ok(done),
             Err(e) => {
-                return Err(anyhow::anyhow!("Failed to confirm transaction: {}", e));
+                Err(anyhow::anyhow!("Failed to confirm transaction: {}", e))
             }
         }
     }

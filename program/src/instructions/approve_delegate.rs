@@ -18,7 +18,7 @@ pub struct ApproveDelegates<'info> {
     pub system_program: Program<'info, System>
 }
 
-pub fn handler(ctx: Context<ApproveDelegates>, delegate: Pubkey) -> Result<()> {
+pub fn delegation_handler(ctx: Context<ApproveDelegates>, delegate: Pubkey) -> Result<()> {
     let clock = Clock::get()?;
     let vault = &mut ctx.accounts.vault;
 

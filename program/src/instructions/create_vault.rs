@@ -18,19 +18,19 @@ pub struct EphemeralVault {
 #[derive(Accounts)]
 pub struct CreateEphemeralVault<'info> {
     #[account(mut)]
-    pub user_wallet: Signer<'info>,
+    pub parent_wallet: Signer<'info>,
     #[account(
         init,
-        payer = user_wallet,
+        payer = parent_wallet,
         space = 8 + std::mem::size_of::<EphemeralVault>(),
-        seeds = [b"vault", user_wallet.key().as_ref()],
+        seeds = [b"vault", parent_wallet.key().as_ref()],
         bump
     )]
     pub vault: Account<'info, EphemeralVault>,
     pub system_program: Program<'info, System>
 }
 
-pub fn handler(
+pub fn vault_handler(
     ctx: Context<CreateEphemeralVault>, 
     approved_amount: u64, 
     session_duration: i64
@@ -42,7 +42,7 @@ pub fn handler(
     require!(session_duration > 0 && session_duration <= 86400, VaultError::InvalidSessionDuration);
     require!(approved_amount > 0, VaultError::InvalidAmount);
 
-    vault.parent_wallet = ctx.accounts.user_wallet.key();
+    vault.parent_wallet = ctx.accounts.parent_wallet.key();
     vault.ephemeral_wallet = vault.key();
     vault.created_at = clock.unix_timestamp;
     vault.last_activity = clock.unix_timestamp
@@ -58,7 +58,7 @@ pub fn handler(
 
     emit!({
         VaultCreated {
-            parent_wallet: ctx.accounts.user_wallet.key(),
+            parent_wallet: ctx.accounts.parent_wallet.key(),
             vault_pda: ctx.accounts.vault.key(),
             approved_amount,
             expires_at,

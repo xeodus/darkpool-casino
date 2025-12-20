@@ -4,18 +4,18 @@ use crate::{error::VaultError, instructions::create_vault::EphemeralVault, state
 #[derive(Accounts)]
 pub struct AutoDeposit<'info> {
     #[account(mut)]
-    pub user_wallet: Signer<'info>,
+    pub parent_wallet: Signer<'info>,
     #[account(
         mut,
-        seeds = [b"vault", user_wallet.key().as_ref()],
+        seeds = [b"vault", parent_wallet.key().as_ref()],
         bump = vault.bump,
-        constraint = vault.parent_wallet == user_wallet.key() @ VaultError::UnauthorizedAccess
+        constraint = vault.parent_wallet == parent_wallet.key() @ VaultError::UnauthorizedAccess
     )]
     pub vault: Account<'info, EphemeralVault>,
     pub system_program: Program<'info, System>
 }
 
-pub fn handler(ctx: Context<AutoDeposit>, amount: u64) -> Result<()> {
+pub fn deposition_handler(ctx: Context<AutoDeposit>, amount: u64) -> Result<()> {
     const MAX_DEPOSITE_PER_SESSION: u64 = 100_000_000;
     let clock = Clock::get()?;
     let vault = &ctx.accounts.vault;
@@ -30,7 +30,7 @@ pub fn handler(ctx: Context<AutoDeposit>, amount: u64) -> Result<()> {
     transfer(CpiContext::new(
         ctx.accounts.system_program.to_account_info(), 
         Transfer {
-            from: ctx.accounts.user_wallet.to_account_info(),
+            from: ctx.accounts.parent_wallet.to_account_info(),
             to: ctx.accounts.vault.to_account_info()
         }),
         amount

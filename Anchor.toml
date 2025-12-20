@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ephemeral_vault = "CYgrGWLzFN4HWQf8VAraMJ2xCEZRozzsLnVHf8sd1Ly"
+darkpool_program = "SFoL2roUqW3DwqzrTm4UP15dh2daApS76RrhQkXZHyo"
 
 [programs.devnet]
-ephemeral_vault = "CYgrGWLzFN4HWQf8VAraMJ2xCEZRozzsLnVHf8sd1Ly"
+darkpool_program = "SFoL2roUqW3DwqzrTm4UP15dh2daApS76RrhQkXZHyo"
 
 [registry]
 url = "https://api.apr.dev"

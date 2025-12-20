@@ -41,7 +41,7 @@ impl KeyManager {
     pub async fn encrypt_keypair(&self, keypair: &Keypair) -> Result<String> {
         let keypair_bytes = keypair.to_bytes();
         let nonce_bytes: [u8; 12] = rand::random();
-        let nonce = Nonce::try_from(nonce_bytes)?;
+        let nonce = Nonce::from(nonce_bytes);
         let cipher_text = self.cipher.encrypt(&nonce, keypair_bytes.as_ref())
             .map_err(|e| anyhow!("Failed to generate cipher text while encrypting the keypair: {}", e))?;
 

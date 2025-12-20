@@ -50,7 +50,6 @@ pub fn encoded_instruction(ix: &Instruction) -> EncodedInstruction {
 }
 
 // Create session request and expect response
-
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
     pub parent_wallet: String,
@@ -109,11 +108,10 @@ pub async fn create_session(
             (StatusCode::INTERNAL_SERVER_ERROR, format!("Internal server error: {}", e))
         })?;
 
-
     Ok(Json(CreateSessionResponse {
         session_id: session.session_id,
         parent_wallet: parent_wallet.to_string(),
-        ephemeral_wallet: session.ephemeral_wallet,
+        ephemeral_wallet: session.ephemeral_wallet, 
         vault_address: vault_address.to_string(),
         created_at: session.created_at,
         expires_at: session.expires_at,

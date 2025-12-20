@@ -5,9 +5,13 @@ use crate::{error::VaultError,
 };
 
 #[derive(Accounts)]
-pub struct CleanupVault<'info> {
+pub struct CleanupVault<'info> {  
+    /// CHECK: This account is only used as a signer to authorize cleanup.
+    /// No data is read and written from this account.
     #[account(mut)]
     pub cleanup_caller: AccountInfo<'info>,
+    /// CHECK: Parent wallet is only used as a lamports destination after closing the vault.
+    /// No data is read or written otherwise.
     #[account(mut)]
     pub parent_wallet: AccountInfo<'info>,
     #[account(
@@ -19,7 +23,7 @@ pub struct CleanupVault<'info> {
     pub vault: Account<'info, EphemeralVault>
 }
 
-pub fn handler(ctx: Context<CleanupVault>) -> Result<()> {
+pub fn cleanup_handler(ctx: Context<CleanupVault>) -> Result<()> {
     let clock = Clock::get()?;
     let vault = &mut ctx.accounts.vault;
 

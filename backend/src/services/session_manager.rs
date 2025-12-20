@@ -1,6 +1,6 @@
 use serde::Serialize;
 use uuid::Uuid;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use deadpool_postgres::Pool;
 use solana_sdk::signer::Signer;
 use anyhow::Result;
@@ -26,20 +26,21 @@ impl SessionManager {
         session_duration: i64
     ) -> Result<SessionInfo> 
     {
-        let keypair = self.key_manager.generate_keypair()?;
-        let encrypted_keypair = self.key_manager.encrypt_keypair(&keypair).await?;
+        let keypair = self.key_manager.generate_keypair()?; 
         let ephemeral_wallet = keypair.pubkey().to_string();
+        let encrypted_keypair = self.key_manager.encrypt_keypair(&keypair).await?;
         let session_id = Uuid::new_v4().to_string();
         let created_at = Utc::now().timestamp();
-        let expires_at = Utc::now() + Duration::seconds(session_duration);
-        let vault_addr = vault_address.to_string();
+        let expires_at = created_at + session_duration;
+        let vault_address = vault_address.to_string();
         let client = self.pool.get().await?;
+        let is_active = true;
 
         client.execute(
             "INSERT INTO sessions (session_id, parent_wallet, ephemeral_wallet, 
-            encrypted_keypair, vault_address, created_at, expires_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)", 
-            &[&session_id, &parent_wallet, &ephemeral_wallet, &encrypted_keypair, &vault_addr, &created_at, &expires_at]
+            encrypted_keypair, vault_address, created_at, expires_at, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", 
+            &[&session_id, &parent_wallet, &ephemeral_wallet, &encrypted_keypair, &vault_address, &created_at, &expires_at, &is_active]
         )
         .await?;
 
@@ -47,9 +48,9 @@ impl SessionManager {
             session_id,
             parent_wallet: parent_wallet.to_string(),
             ephemeral_wallet,
-            vault_address: vault_addr,
+            vault_address,
             created_at,
-            expires_at: expires_at.timestamp(),
+            expires_at,
             is_active: true
         })
     }

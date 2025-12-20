@@ -16,7 +16,7 @@ pub struct RevokeAccess<'info> {
     pub vault: Account<'info, EphemeralVault>,
 }
 
-pub fn handler(ctx: Context<RevokeAccess>) -> Result<()> {
+pub fn access_handler(ctx: Context<RevokeAccess>) -> Result<()> {
     let clock = Clock::get()?;
     let vault = &mut ctx.accounts.vault;
 

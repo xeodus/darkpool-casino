@@ -18,10 +18,8 @@ impl DelegationManager {
 
     #[inline]
     fn program_id() -> Pubkey {
-        let program_id = Pubkey::from_str(&env::var("PROGRAM_ID")
-            .expect("Program ID is not set..")).unwrap();
-
-        program_id
+        Pubkey::from_str(&env::var("PROGRAM_ID")
+            .expect("Program ID is not set..")).unwrap() 
     }
 
     // Derive the vault PDA your program expects: seeds = [b"vault", parent_wallet]

@@ -17,7 +17,7 @@ pub struct ExecuteTrade<'info> {
     pub system_program: Program<'info, System>
 }
 
-pub fn handler(ctx: Context<ExecuteTrade>, trade_amount: u64, trading_fee: u64) -> Result<()> {
+pub fn execution_handler(ctx: Context<ExecuteTrade>, trade_amount: u64, trading_fee: u64) -> Result<()> {
     let clock = Clock::get()?;
     let vault = &mut ctx.accounts.vault;
 

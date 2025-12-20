@@ -1,11 +1,11 @@
 CREATE TABLE IF NOT EXISTS sessions (
     session_id VARCHAR(64) UNIQUE NOT NULL,
     parent_wallet VARCHAR(44) NOT NULL,
-    ephemeral_wallet VARCHAR(44) NOT NULL,
-    encrypted_keypair TEXT NOT NULL,
+    ephemeral_wallet VARCHAR(44) NOT NULL, 
     vault_address VARCHAR(44) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMP NOT NULL,
+    encrypted_keypair TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT true
 );
 
